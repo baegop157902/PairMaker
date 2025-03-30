@@ -2,7 +2,7 @@ const konvaPlaceholders = {};
 
 function createPlaceholder(inputId, targetGroup, position) {
     const img = new Image();
-    img.src = '/assets/DefaultImg.png';
+    img.src = './assets/DefaultImg.png';
 
     const placeholder = new Konva.Image({
         x: position.x,
