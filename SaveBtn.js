@@ -6,18 +6,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const modalImage = document.getElementById("modal-image");
     const canvas = document.getElementById("canvas-container");
 
-    const uploadedImage = new Image();
-        uploadedImage.onload = function () {
-            const image = new Konva.Image({
-                image: uploadedImage,
-                width: 1920,
-                height: 1080,
-            });
-            layer.add(image);
-            layer.draw();
-        };
-    uploadedImage.src = '/path/to/your/image.png';
-
 
     // 미리보기
     saveBtn.addEventListener("click", function () {
@@ -74,3 +62,4 @@ document.addEventListener("DOMContentLoaded", function () {
 
     });
 });
+
