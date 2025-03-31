@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const reader = new FileReader();
                 reader.onload = function (e) {
                     imagePreview.src = e.target.result;
-                    cropContainer.style.display = 'block';
+                    cropContainer.style.display = 'flex';
                     activeLabel = label;
 
                     imagePreview.onload = function () {

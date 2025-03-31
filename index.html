@@ -12,9 +12,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Dela+Gothic+One&family=Iansui&family=Kaisei+Decol&family=Lilita+One&family=Song+Myung&family=Tektur:wght@800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/iconoir-icons/iconoir@main/css/iconoir.css" />
-    <link rel="stylesheet" href="https://easylogic.github.io/colorpicker/dist/colorpicker.css" />
-    <script src="https://easylogic.github.io/colorpicker/dist/colorpicker.js"></script>
-
+    
     <script src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.es5.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css"/> <!-- 'classic' theme -->
@@ -52,7 +50,9 @@
         <button id="close-button"></button>
             <label for="close-button" class="close"><i class="iconoir-xmark"></i></label>
         </div>
-        <img id="image-preview" src="" alt="이미지 미리보기" />
+        <div class="image-wrapper">
+            <img id="image-preview" src="" alt="이미지 미리보기" />
+        </div>
         <div class="btn-box">
         <!-- <button id="aspect-free" class="size-btn">자유</button> -->
         <button id="aspect-1-1" class="size-btn">1:1</button>
