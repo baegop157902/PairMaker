@@ -8,11 +8,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const closeButton = document.getElementById('close-button');
     let cropper;
     let activeLabel = null;
-    
 
     fileInputs.forEach(fileInput => {
         const label = fileInput.nextElementSibling;
-        const icon = label.querySelector('i');
 
         fileInput.addEventListener('change', function (event) {
             const file = event.target.files[0];
@@ -42,6 +40,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     };
                 };
                 reader.readAsDataURL(file);
+
+                fileInput.value = '';
             }
         });
     });
@@ -56,38 +56,28 @@ document.addEventListener('DOMContentLoaded', function () {
             height: imageData.height
         });
     }
-    
-    /*
-    document.getElementById('aspect-free').addEventListener('click', function () {
-        if (cropper) {
-            cropper.setAspectRatio(NaN); // 자유
-            setMaxCropBox();
-        }
-    });
-    */
 
     document.getElementById('aspect-1-1').addEventListener('click', function () {
         if (cropper) {
-            cropper.setAspectRatio(1); // 1:1
+            cropper.setAspectRatio(1);
             setMaxCropBox();
         }
     });
 
     document.getElementById('aspect-ld').addEventListener('click', function () {
         if (cropper) {
-            cropper.setAspectRatio(14 / 45); // 14:45
+            cropper.setAspectRatio(14 / 45);
             setMaxCropBox();
         }
     });
 
     document.getElementById('aspect-token').addEventListener('click', function () {
         if (cropper) {
-            cropper.setAspectRatio(1 / 1.426); // 1:1.426
+            cropper.setAspectRatio(1 / 1.426);
             setMaxCropBox();
         }
     });
 
-    
     cropButton.addEventListener("click", function () {
         if (!cropper || !activeLabel) return;
 
@@ -111,12 +101,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
         cropContainer.style.display = "none";
     });
-    
+
     closeButton.addEventListener('click', function () {
         cropContainer.style.display = 'none';
     });
 
 });
-
-
-

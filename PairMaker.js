@@ -276,7 +276,7 @@ function CreateOtherName(textID, colorID, initialX, initialAlign, fontID) {
         text: textValue,
         fill: colorValue,
         x: initialX,
-        y: 126,
+        y: 124,
         width: 446,
         fontSize: 50,
         fontStyle: "800",
