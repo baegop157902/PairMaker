@@ -21,6 +21,10 @@ export const tabs = [{
     id: 'maintweet',
     label: '메인트',
     heading: '메인트'
+}, {
+    id: 'stickers',
+    label: '스티커',
+    type: 'stickers'
 }];
 export const groups = [
     ['Back', '배경'],
