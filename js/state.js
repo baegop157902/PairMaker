@@ -40,7 +40,7 @@ export async function validateState(raw,definition) {
   if(definition.restoreState) next=await definition.restoreState(raw,next);
   const positions=definition.getPositions?.(next)??definition.positions??{};
   const size=definition.getSize?.(next)??definition.size;
-  const fieldTypes=new Map();
+  const fieldTypes=new Map(),fieldLimits=new Map();
   const radioOptions=new Map();
   const numberFields=new Map();
   const tabs=typeof definition.tabs==='function'?definition.tabs(next):definition.tabs;
@@ -49,7 +49,7 @@ export async function validateState(raw,definition) {
     const source=tab.groups??definition.groups??[];
     const groups=typeof source==='function'?source(next,tab.id):source;
     for(const [group] of groups)for(const field of definition.fields(tab.id,group,next)){
-      fieldTypes.set(field.id,field.type);
+      fieldTypes.set(field.id,field.type);fieldLimits.set(field.id,field.maxLength??1000);
       if(field.type==='number')numberFields.set(field.id,field);
       if(field.type==='radio')radioOptions.set(field.id,field.options.map(option=>option.value));
     }
@@ -68,7 +68,7 @@ export async function validateState(raw,definition) {
       next.values[key]=value;next.touched[key]=raw.touched?.[key]===true;
       continue;
     }
-    if(typeof value!=='string' || value.length>1000)throw new Error('텍스트 값이 올바르지 않아요.');
+    if(typeof value!=='string' || value.length>(fieldLimits.get(key)??1000))throw new Error('텍스트 값이 올바르지 않아요.');
     if(fieldTypes.get(key)==='radio' && !radioOptions.get(key).includes(value))throw new Error('선택 항목 값이 올바르지 않아요.');
     if(fieldTypes.get(key)==='font' && !fonts.includes(value))throw new Error('지원하지 않는 글꼴이에요.');
     if(fieldTypes.get(key)==='color' && !/^#[0-9a-f]{6}$/i.test(value))throw new Error('색상 값이 올바르지 않아요.');
@@ -85,7 +85,8 @@ export async function validateState(raw,definition) {
     for(const key of ['x','y','width','height','rotation'])if(!Number.isFinite(item[key]))throw new Error('스티커 좌표가 올바르지 않아요.');
     if(item.width<8 || item.height<8 || item.width>Math.max(size.width,size.height)*2 || item.height>Math.max(size.width,size.height)*2 || Math.abs(item.x)>Math.max(size.width,size.height)*3 || Math.abs(item.y)>Math.max(size.width,size.height)*3 || Math.abs(item.rotation)>36000)throw new Error('스티커 크기·위치가 범위를 벗어났어요.');
     await decodeImage(item.src); ids.add(item.id);
-    next.stickers.push({id:item.id,src:item.src,name:String(item.name||'스티커').slice(0,100),x:item.x,y:item.y,width:item.width,height:item.height,rotation:item.rotation,shadow:item.shadow===true,outline: item.outline === true, citation: String(item.citation || '').slice(0, 100)});
+    const restoredSticker={id:item.id,src:item.src,name:String(item.name||'스티커').slice(0,100),x:item.x,y:item.y,width:item.width,height:item.height,rotation:item.rotation,shadow:item.shadow===true,outline: item.outline === true, citation: String(item.citation || '').slice(0, 100)};
+    definition.restoreSticker?.(item,restoredSticker,next);next.stickers.push(restoredSticker);
   }
   return next;
 }

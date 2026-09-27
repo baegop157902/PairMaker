@@ -526,19 +526,20 @@
     window.addEventListener('resize', positionDelete);
     window.addEventListener('scroll', positionDelete, true);
     
-    function select(id) { selected = nodes.has(id) ? id : null; transformer.nodes(selected ? [nodes.get(selected)] : []); transformer.moveToTop(); positionDelete(); layer.batchDraw(); onSelect?.(selected); }
+    function select(id) { store.definition.selectSticker?.(store.state.stickers.find(item=>item.id===id),store); selected = nodes.has(id) ? id : null; transformer.nodes(selected ? [nodes.get(selected)] : []); transformer.moveToTop(); positionDelete(); layer.batchDraw(); onSelect?.(selected); }
     function remove(id) { if (!id) return; select(null); store.change(s => { s.stickers = s.stickers.filter(item => item.id !== id); }, 'stickers'); }
     deleteButton.onclick = () => remove(selected);
     
     function commit(node) {
-        const size = getSize();
+        const item=store.state.stickers.find(item=>item.id===node.id());
+        const bounds=store.definition.stickerBounds?.(item,store.state)??{x:0,y:0,...getSize()};
         const width = node.width() * node.scaleX(), height = node.height() * node.scaleY(); node.size({ width, height }); node.scale({ x: 1, y: 1 });
         const rect = node.getClientRect({ relativeTo: stage, skipShadow: true });
-        if (rect.x + rect.width < 16) node.x(node.x() + 16 - rect.x - rect.width);
-        if (rect.y + rect.height < 16) node.y(node.y() + 16 - rect.y - rect.height);
-        if (rect.x > size.width - 16) node.x(node.x() + size.width - 16 - rect.x);
-        if (rect.y > size.height - 16) node.y(node.y() + size.height - 16 - rect.y);
-        store.change(s => { const item = s.stickers.find(item => item.id === node.id()); if (item) Object.assign(item, { x: node.x(), y: node.y(), width, height, rotation: node.rotation() }); }, 'stickers');
+        if (rect.x + rect.width < bounds.x + 16) node.x(node.x() + bounds.x + 16 - rect.x - rect.width);
+        if (rect.y + rect.height < bounds.y + 16) node.y(node.y() + bounds.y + 16 - rect.y - rect.height);
+        if (rect.x > bounds.x + bounds.width - 16) node.x(node.x() + bounds.x + bounds.width - 16 - rect.x);
+        if (rect.y > bounds.y + bounds.height - 16) node.y(node.y() + bounds.y + bounds.height - 16 - rect.y);
+        store.change(s => { const item = s.stickers.find(item => item.id === node.id()); if (item) Object.assign(item, { x: node.x(), y: node.y(), width, height, rotation: node.rotation(), ...store.definition.stickerCoordinates?.(node,item,s) }); }, 'stickers');
         positionDelete();
     }
 
@@ -617,7 +618,7 @@
             group.on('dragend transformend', () => commit(group));
         }
         
-        group.setAttrs({ x: item.x, y: item.y, width: item.width, height: item.height, rotation: item.rotation, scaleX: 1, scaleY: 1 }); 
+        group.setAttrs({ x: item.x, y: item.y, width: item.width, height: item.height, rotation: item.rotation, scaleX: 1, scaleY: 1, ...store.definition.stickerPlacement?.(item,store.state) }); 
         group.setAttrs({ shadowEnabled: false });
         
         const main = group.findOne('.main');
@@ -687,7 +688,7 @@
             if (group) group.moveToTop();
         }
         
-        if (selected && !nodes.has(selected)) selected = null;
+        if (selected && (!nodes.has(selected) || !nodes.get(selected).visible())) selected = null;
         transformer.nodes(selected ? [nodes.get(selected)] : []); 
         transformer.moveToTop(); // 선택 박스를 가장 마지막에 최상단으로 끌어올림
         positionDelete(); 
@@ -706,9 +707,9 @@
         if (store.state.stickers.length >= MAX_STICKERS) throw new Error(`스티커는 최대 ${MAX_STICKERS}개까지 추가할 수 있어요.`);
         const img = await decodeImage(src), scale = Math_min(300 / img.naturalWidth, 300 / img.naturalHeight);
         const id = crypto.randomUUID(), width = img.naturalWidth * scale, height = img.naturalHeight * scale;
-        const size = getSize();
+        const size = store.definition.stickerSize?.(store.state) ?? getSize();
         
-        store.change(s => s.stickers.unshift({ id, name, src, x: (size.width - width) / 2, y: (size.height - height) / 2, width, height, rotation: 0, shadow: false, outline: false, citation: '' }), 'stickers');
+        store.change(s => s.stickers.unshift({ id, name, src, x: (size.width - width) / 2, y: (size.height - height) / 2, width, height, rotation: 0, shadow: false, outline: false, citation: '', ...store.definition.stickerDefaults?.(s) }), 'stickers');
         await render(); select(id); notify('스티커를 추가했어요. 캔버스에서 이동·크기 조절·회전할 수 있어요.');
         }
     };

@@ -29,7 +29,93 @@ function modal(title){
 }
 function button(label,fn){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=async()=>{b.disabled=true;try{await fn();}catch(error){notify(error.message);}finally{b.disabled=false;}};return b;}
 
-export function attachSaving(store,stage,stickers,waitForDraw) {
+
+// PDF 도구는 다운로드할 때만 불러오며 서버로 편집 데이터를 전송하지 않습니다.
+let pdfTools;
+function loadPdfTools() {
+  return pdfTools ??= Promise.all([
+    ['PDFLib', 'pdf-lib.min.js'], ['fontkit', 'fontkit.umd.min.js']
+  ].map(([global, file]) => window[global] ? Promise.resolve() : new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = new URL('../vendor/pdf/' + file, import.meta.url);
+    script.onload = resolve;
+    script.onerror = () => { script.remove(); reject(new Error('PDF 도구를 불러오지 못했어요. 다시 시도해 주세요.')); };
+    document.head.append(script);
+  }))).catch(error => { pdfTools = null; throw error; });
+}
+// 배경 이미지 → 실제 PDF 텍스트 → 스티커 순으로 같은 캔버스 배치를 재현합니다.
+async function pagePdf(pageIds, renderPage, size, progress, signal) {
+  await loadPdfTools(); signal.throwIfAborted();
+  const lib = window.PDFLib, doc = await lib.PDFDocument.create();
+  const fonts = new Map();
+  async function getFont(serif, weight) {
+    const family = serif ? 'serif' : 'gothic', key = family + weight;
+    if (fonts.has(key)) return fonts.get(key);
+    const response = await fetch(new URL(`../vendor/pdf/${family}-${weight}.ttf.zlib`, import.meta.url), { signal });
+    if (!response.ok) throw new Error('PDF 글꼴을 불러오지 못했어요.');
+    doc.registerFontkit(window.fontkit);
+    const font = await doc.embedFont(window.fflate.unzlibSync(new Uint8Array(await response.arrayBuffer())), { subset: false });
+    fonts.set(key, font); return font;
+  }
+  const coverage = new Map();
+  async function textWithFallback(items) {
+    const result = [];
+    for (const item of items) {
+      const font = await getFont(item.serif, item.weight);
+      if (!coverage.has(font)) coverage.set(font, new Set(font.getCharacterSet()));
+      let current = null, advance = 0;
+      for (const [index, char] of [...item.text].entries()) {
+        const fallback = !coverage.get(font).has(char.codePointAt(0));
+        const serif = fallback ? !item.serif : item.serif;
+        const weight = !serif ? (item.weight >= 600 ? 700 : 400) : item.weight;
+        if (!current || current.serif !== serif || current.weight !== weight) {
+          current = { ...item, text: '', advances: [], x: item.x + advance, serif, weight };
+          result.push(current);
+        }
+        current.text += char; current.advances.push(item.advances[index]);
+        advance += item.advances[index];
+      }
+    }
+    return result;
+  }
+  async function paintImage(page, canvas) {
+    const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value)
+      : reject(new Error('PDF 이미지 생성에 실패했어요.')), 'image/png'));
+    const image = await doc.embedPng(await blob.arrayBuffer());
+    page.drawImage(image, { x: 0, y: 0, width: size.width * .75, height: size.height * .75 });
+  }
+  for (let i = 0; i < pageIds.length; i++) {
+    signal.throwIfAborted(); progress(i + 1, pageIds.length);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const { canvas, text, overlay } = renderPage(pageIds[i]);
+    try {
+      const page = doc.addPage([size.width * .75, size.height * .75]);
+      await paintImage(page, canvas);
+      for (const item of await textWithFallback(text)) {
+        if (!item.text) continue;
+        const font = await getFont(item.serif, item.weight), fontKey = page.node.newFontDictionary(font.name, font.ref);
+        const fontSize = item.size * .75, parts = lib.PDFArray.withContext(doc.context);
+        [...item.text].forEach((char, index) => {
+          parts.push(font.encodeText(char));
+          const natural = font.widthOfTextAtSize(char, fontSize);
+          parts.push(lib.PDFNumber.of((natural - item.advances[index] * .75 / item.scaleX) * 1000 / fontSize));
+        });
+        const color = /^#[0-9a-f]{6}$/i.test(item.color) ? item.color : '#323232';
+        const rgb = [1, 3, 5].map(start => parseInt(color.slice(start, start + 2), 16) / 255);
+        page.pushOperators(lib.pushGraphicsState(), lib.setFillingRgbColor(...rgb),
+          lib.beginText(), lib.setFontAndSize(fontKey, fontSize),
+          lib.setTextMatrix(item.scaleX, 0, 0, 1, item.x * .75,
+            page.getHeight() - (item.y + item.size * .85) * .75),
+          lib.PDFOperator.of('TJ', [parts]), lib.endText(), lib.popGraphicsState());
+      }
+      if (overlay) await paintImage(page, overlay);
+    } finally { canvas.width = canvas.height = 1; if (overlay) overlay.width = overlay.height = 1; }
+  }
+  signal.throwIfAborted();
+  return new Blob([await doc.save()], { type: 'application/pdf' });
+}
+
+export function attachSaving(store,stage,stickers,waitForDraw,scene) {
   const {size,initialState}=store.definition;
   const draftKey=store.state.templateId+':autosave';
   let queue=Promise.resolve();
@@ -147,6 +233,35 @@ export function attachSaving(store,stage,stickers,waitForDraw) {
     const url=URL.createObjectURL(blob);image.src=url;dialog.append(image);
     const note=document.createElement('p');note.className='download-note';note.textContent=`${canvas.width} × ${canvas.height} px · 모바일에서는 이미지를 길게 눌러 저장할 수도 있어요.`;
     const downloadButton=button('PNG 다운로드',()=>download(blob,store.state.templateId+'.png'));downloadButton.className='png-download';dialog.append(note,downloadButton);
+    if (store.definition.pdfExport && scene?.renderPdfPage) {
+      const status = document.createElement('p');
+      status.className = 'download-note'; status.setAttribute('role', 'status');
+      status.textContent = 'PDF는 전체 페이지를 저장하며, 텍스트를 선택·복사할 수 있어요.';
+      const controller = new AbortController();
+      dialog.addEventListener('close', () => controller.abort(), { once: true });
+      const pdfButton = button('PDF 다운로드', async () => {
+        try {
+          scene.paginate?.();
+          await waitForDraw(); await document.fonts.ready;
+          controller.signal.throwIfAborted();
+          const snapshot = structuredClone(store.state);
+          const pdf = await pagePdf(snapshot.pages,
+            id => scene.renderPdfPage(snapshot, id, stickers.layer), size,
+            (page, total) => { status.textContent = `PDF 만드는 중… ${page} / ${total}p`; }, controller.signal);
+          download(pdf, snapshot.templateId + '.pdf');
+          status.textContent = `${snapshot.pages.length}페이지 PDF를 저장했어요.`;
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          status.textContent = 'PDF 저장에 실패했어요. 다시 시도해 주세요.';
+          throw error;
+        }
+      });
+      pdfButton.className = 'png-download pdf-download';
+      const actions = document.createElement('div');
+      actions.className = 'textlog-download-actions';
+      actions.append(downloadButton, pdfButton);
+      dialog.append(actions, status);
+    }
     dialog.addEventListener('close',()=>URL.revokeObjectURL(url),{once:true});
   }
   async function reset(){

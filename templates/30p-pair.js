@@ -561,7 +561,7 @@ export function createScene(stage, openEditor, store) {
     resizeHandle.className = 'member-preview-resize';
     resizeHandle.setAttribute('aria-label', '미리보기 크기 조절');
     resizeHandle.title = '드래그하거나 방향키로 크기 조절';
-    resizeHandle.innerHTML = '<i class="bi bi-arrows-angle-expand" aria-hidden="true"></i>';
+    resizeHandle.textContent = '◢';
     preview.append(previewHeader, previewCanvas, resizeHandle);
     let previewClosed = false,
         desktopSize = {
