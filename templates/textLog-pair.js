@@ -202,9 +202,11 @@ function drawText(
   const group = new Konva.Group({
     x,
     y,
-    clipX: 0,
+    // 음수 자간과 글꼴의 돌출 부분이 잘리지 않도록 좌우에 여유를 둡니다.
+    // 줄바꿈 폭과 문단 좌표는 유지하고, 그리기 영역만 3px씩 넓힙니다.
+    clipX: -3,
     clipY: 0,
-    clipWidth: width,
+    clipWidth: width + 6,
     clipHeight: height,
     listening: false,
     name: style.fieldId || "",
@@ -644,6 +646,8 @@ function paginate(store) {
   }
 }
 export function restoreState(raw, next) {
+  // 이전 파일도 저장된 원문·서식을 현재 글꼴 설정과 그리기 영역으로 다시 배치합니다.
+  clearMeasureCache();
   if (
     !Array.isArray(raw.pages) ||
     !raw.pages.length ||

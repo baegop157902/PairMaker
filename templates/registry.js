@@ -7,7 +7,7 @@ const templates = {
   'textLog-vert': () => import('./textLog-vert.js'),
   'textLog-hori': () => import('./textLog-hori.js'),
   'textLog-pair': () => import('./textLog-pair.js'),
-  'main-tweet': () => import('./main-tweet.js')
+  'main-tweet': () => import('./main-tweet.js'),
 };
 
 export async function loadTemplate(id) {

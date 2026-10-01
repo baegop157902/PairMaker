@@ -21,7 +21,7 @@ export const fonts = [
     'Kaisei Decol'
 ];
 
-export const groups = [
+const characterGroups = [
     ['profile', '두상'],
     ['name', '이름&캐프'],
     ['LD', '전신 배경'],
@@ -34,7 +34,14 @@ export const groups = [
     ['flat', '한 줄 설명']
 ];
 
+export function groups(_state, side) {
+    if (side === 'common') return [['bg', '배경']];
+    if (side === 'left' || side === 'right') return characterGroups;
+    return [];
+}
+
 export const positions = {
+    'common-bg-image': { x: 0, y: 0, ...size },
     'left-LD-image': {
         x: 0,
         y: 0,
@@ -120,6 +127,24 @@ export function fields(side, group) {
         type
     });
     switch (group) {
+        case 'bg':
+            return [
+                {
+                    ...field('bg-mode', '배경 선택', 'radio'),
+                    options: [
+                        { value: 'color', label: '단색' },
+                        { value: 'image', label: '이미지' }
+                    ]
+                },
+                {
+                    ...field('bg-color', '배경색', 'color'),
+                    visibleWhen: { id: `${side}-bg-mode`, value: 'color' }
+                },
+                {
+                    ...field('bg-blur', '배경 흐리게', 'checkbox'),
+                    visibleWhen: { id: `${side}-bg-mode`, value: 'image' }
+                }
+            ];
         case 'profile':
         case 'add-1':
         case 'add-2':
@@ -132,7 +157,14 @@ export function fields(side, group) {
         case 'name':
             return [field('korea-name', '이름'), field('korea-name-color', '이름 색상', 'color'), field('etc-name', '캐치프레이즈'), field('etc-name-color', '캐치프레이즈 색상', 'color'), field('sub-font', '캐치프레이즈 폰트', 'font'), field('small-check', '더 작은 텍스트', 'checkbox')];
         case 'description':
-            return [field('clothes', '평소의상', 'textarea'), field('charac', '외관특징', 'textarea'), field('cm', '키 (cm)'), field('animal', '모에화')];
+            return [
+                field('clothes-title', '평소외관 제목'),
+                field('clothes', '평소의상 내용', 'textarea'),
+                field('charac-title', '외관특징 제목'),
+                field('charac', '외관특징 내용', 'textarea'),
+                field('cm', '키 (cm)'),
+                field('animal', '모에화')
+            ];
         case 'colors':
             return [field('hair', '머리 색', 'color'), field('left-eyes', '왼쪽 눈', 'color'), field('right-eyes', '오른쪽 눈', 'color')];
         case 'flat':
@@ -143,7 +175,12 @@ export function fields(side, group) {
 }
 
 export function initialState(id = templateId) {
-    const values = {};
+    const values = {
+        'common-bg-mode': 'color',
+        'common-bg-color': '#f6f6f6',
+        'common-bg-blur': false,
+        'common-bg-image-citation': ''
+    };
     for (const side of ['left', 'right']) {
         for (const group of ['profile', 'add-1', 'add-2', 'add-3']) {
             values[`${side}-${group}-background-enabled`] = false;
@@ -163,6 +200,8 @@ export function initialState(id = templateId) {
             [`${side}-small-check`]: false,
             [`${side}-korea-name-color`]: '#323232',
             [`${side}-etc-name-color`]: '#323232',
+            [`${side}-clothes-title`]: '평소외관',
+            [`${side}-charac-title`]: '외관특징',
             [`${side}-clothes`]: '여기에 설명을 적어주세요.',
             [`${side}-charac`]: '여기에 설명을 적어주세요.',
             [`${side}-cm`]: '',
@@ -185,6 +224,46 @@ export function initialState(id = templateId) {
     };
 }
 
+// 이전 저장 파일에는 배경 선택과 제목 입력값이 없습니다. 기존 값·이미지는 보존합니다.
+export function migrateState(source) {
+    const raw = structuredClone(source);
+    if (!raw.values || typeof raw.values !== 'object' || Array.isArray(raw.values)) return raw;
+    raw.values = { ...initialState().values, ...raw.values };
+    return raw;
+}
+
+export function restoreState(_raw, next) {
+    // 공통 검증기가 이 기본값에 저장된 입력값과 이미지를 병합합니다.
+    next.values = { ...initialState().values, ...next.values };
+    return next;
+}
+
+// 실제 이미지의 알파를 줄입니다. 원본 저장 데이터와 배경색은 바꾸지 않습니다.
+function fadeLDImage(image, box, left) {
+    const canvas = document.createElement('canvas');
+    canvas.width = box.width;
+    canvas.height = box.height;
+    const ctx = canvas.getContext('2d');
+    const ratio = Math.max(box.width / image.naturalWidth, box.height / image.naturalHeight);
+    const width = box.width / ratio, height = box.height / ratio;
+    ctx.drawImage(image, (image.naturalWidth - width) / 2, (image.naturalHeight - height) / 2,
+        width, height, 0, 0, box.width, box.height);
+    const mask = ctx.createLinearGradient(0, 0, box.width, 0);
+    if (left) {
+        mask.addColorStop(0, '#000');
+        mask.addColorStop(0.8, '#000');
+        mask.addColorStop(1, 'rgba(0,0,0,0)');
+    } else {
+        mask.addColorStop(0, 'rgba(0,0,0,0)');
+        mask.addColorStop(0.2, '#000');
+        mask.addColorStop(1, '#000');
+    }
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = mask;
+    ctx.fillRect(0, 0, box.width, box.height);
+    return canvas;
+}
+
 export function createPairScene(stage, openEditor) {
     const K = window.Konva;
     const layer = new K.Layer();
@@ -195,22 +274,60 @@ export function createPairScene(stage, openEditor) {
     });
     layer.add(bg);
     const ld = new K.Group(),
-        gradients = new K.Group({
+        guides = new K.Group({
             listening: false
         }),
         boxes = new K.Group(),
         content = new K.Group();
-    layer.add(ld, gradients, boxes, content);
+    layer.add(ld, guides, boxes, content);
     const imageNodes = new Map(),
         textBindings = [],
         nameSizeBindings = [],
         colorBindings = [];
-    let currentValues = initialState().values;
+    const defaults = initialState().values;
+    let currentValues = defaults;
+    let backgroundImage = null;
+    let filteredBackgroundImage = null;
+    let backgroundBlurred = false;
+    function refreshCanvasBackground() {
+        const imageMode = currentValues['common-bg-mode'] === 'image';
+        const item = imageNodes.get('common-bg-image');
+        bg.fill(imageMode ? '#F6F6F6' : currentValues['common-bg-color']);
+        item.image.visible(imageMode && !!backgroundImage);
+        item.rect.visible(false);
+        item.plus.visible(false);
+        const blur = imageMode && !!backgroundImage && currentValues['common-bg-blur'] === true;
+        // 다른 입력값을 바꿀 때마다 큰 배경 이미지를 다시 캐시하지 않습니다.
+        if (filteredBackgroundImage !== backgroundImage || backgroundBlurred !== blur) {
+            item.image.clearCache();
+            item.image.filters(blur ? [K.Filters.Blur] : []);
+            item.image.blurRadius(blur ? 10 : 0);
+            if (blur) item.image.cache();
+            filteredBackgroundImage = backgroundImage;
+            backgroundBlurred = blur;
+        }
+    }
     function updateBackground(id, item) {
+        if (id === 'common-bg-image') return;
         const side = id.startsWith('left-') ? 'left' : 'right';
         const group = id.slice(side.length + 1).replace(/-image$/, '');
         const supported = ['profile', 'add-1', 'add-2', 'add-3'].includes(group);
         const hasImage = !!item.image.image();
+        if (group === 'LD') {
+            // 투명한 선택 영역을 남겨 업로드 후에도 전신 이미지를 클릭할 수 있게 합니다.
+            if (hasImage) {
+                item.rect.fillPriority('color');
+                item.rect.fill('rgba(0,0,0,0)');
+                return;
+            }
+            item.rect.fillPriority('linear-gradient');
+            item.rect.fillLinearGradientStartPoint({ x: 0, y: 0 });
+            item.rect.fillLinearGradientEndPoint({ x: item.p.width, y: 0 });
+            item.rect.fillLinearGradientColorStops(side === 'left'
+                ? [0, '#323232', 0.8, '#323232', 1, 'rgba(50,50,50,0)']
+                : [0, 'rgba(50,50,50,0)', 0.2, '#323232', 1, '#323232']);
+            return;
+        }
         const fill = !hasImage ? '#323232' : supported && currentValues[`${side}-${group}-background-enabled`]
             ? currentValues[`${side}-${group}-background-color`] : supported ? 'rgba(0,0,0,0)' : null;
         item.rect.fill(fill);
@@ -292,7 +409,7 @@ export function createPairScene(stage, openEditor) {
 
         group.add(rect, clip, plus, citationText);
         parent.add(group);
-        const side = id.startsWith('left') ? 'left' : 'right';
+        const side = id.startsWith('common-') ? 'common' : id.startsWith('left') ? 'left' : 'right';
         const key = id.slice(side.length + 1).replace(/-image$/, '');
         clickable(group, side, key);
         imageNodes.set(id, {
@@ -303,43 +420,18 @@ export function createPairScene(stage, openEditor) {
             citationText
         });
     }
+    // 원래 단색 배경 뒤가 아니라, 같은 배경 위치를 이미지로 대체합니다.
+    addImage('common-bg-image', layer);
+    imageNodes.get('common-bg-image').image.getParent().getParent().moveToBottom();
+    bg.moveToBottom();
+    clickable(bg, 'common', 'bg');
     addImage('left-LD-image', ld);
     addImage('right-LD-image', ld);
-    gradients.add(new K.Line({
+    guides.add(new K.Line({
         points: [962, 190, 962, 1035],
         stroke: '#9A9A9A',
         strokeWidth: 1,
         dash: [14, 12]
-    }));
-    gradients.add(new K.Rect({
-        x: 0,
-        y: 0,
-        width: 340,
-        height: 1080,
-        fillLinearGradientStartPoint: {
-            x: 0,
-            y: 0
-        },
-        fillLinearGradientEndPoint: {
-            x: 340,
-            y: 0
-        },
-        fillLinearGradientColorStops: [0.8, 'rgba(246,246,246,0)', 1, 'rgba(246,246,246,1)']
-    }));
-    gradients.add(new K.Rect({
-        x: 1580,
-        y: 0,
-        width: 340,
-        height: 1080,
-        fillLinearGradientStartPoint: {
-            x: 0,
-            y: 0
-        },
-        fillLinearGradientEndPoint: {
-            x: 340,
-            y: 0
-        },
-        fillLinearGradientColorStops: [0, 'rgba(246,246,246,1)', 0.2, 'rgba(246,246,246,0)']
     }));
     for (const [side, x] of [
             ['left', 290],
@@ -367,7 +459,7 @@ export function createPairScene(stage, openEditor) {
         clickable(flat, side, 'flat');
         colorBindings.push([flat, `${side}-flat-back-color`]);
     }
-    Object.keys(positions).filter(id => !id.includes('-LD-')).forEach(id => addImage(id, content));
+    Object.keys(positions).filter(id => !id.includes('-LD-') && id !== 'common-bg-image').forEach(id => addImage(id, content));
 
     function text(attrs, binding, side, group) {
         const node = new K.Text({
@@ -413,19 +505,23 @@ export function createPairScene(stage, openEditor) {
         }, side, 'name');
         nameSizeBindings.push({side, nameText, catchphraseText});
         text({
-            x: left ? 333 : 1516,
+            x: left ? 333 : 1278,
             y: 269,
-            text: '평소의상',
+            width: 308,
+            align,
+            text: '평소외관',
             fontSize: 20,
             fontStyle: '700'
-        }, null, side, 'description');
+        }, { text: `${side}-clothes-title` }, side, 'description');
         text({
-            x: left ? 333 : 1516,
+            x: left ? 333 : 1278,
             y: 370,
+            width: 308,
+            align,
             text: '외관특징',
             fontSize: 20,
             fontStyle: '700'
-        }, null, side, 'description');
+        }, { text: `${side}-charac-title` }, side, 'description');
         text({
             x: left ? 333 : 1278,
             y: 296,
@@ -522,13 +618,15 @@ export function createPairScene(stage, openEditor) {
     return {
         layer,
         updateValues(values) {
-            currentValues = values;
+            currentValues = { ...defaults, ...values };
+            values = currentValues;
+            refreshCanvasBackground();
             for (const [id, item] of imageNodes) {
                 updateBackground(id, item);
                 
                 if (item.citationText) {
                     const textVal = values[`${id}-citation`];
-                    const hasImg = !!item.image.image();
+                    const hasImg = !!item.image.image() && (id !== 'common-bg-image' || values['common-bg-mode'] === 'image');
                     if (hasImg && textVal && textVal.trim() !== '') {
                         item.citationText.text('ⓒ ' + textVal);
                         item.citationText.visible(true);
@@ -567,11 +665,21 @@ export function createPairScene(stage, openEditor) {
                     width: w,
                     height: h
                 });
+                if (id.includes('-LD-')) {
+                    item.image.image(fadeLDImage(img, item.p, id.startsWith('left-')));
+                    item.image.crop({ x: 0, y: 0, width: item.p.width, height: item.p.height });
+                }
+            }
+            if (id === 'common-bg-image') {
+                backgroundImage = img || null;
+                // 새로운 원본과 크롭으로 흐림 캐시를 다시 만듭니다.
+                filteredBackgroundImage = null;
+                refreshCanvasBackground();
             }
             
             if (item.citationText) {
                 const textVal = currentValues[`${id}-citation`];
-                item.citationText.visible(!!img && !!textVal && textVal.trim() !== '');
+                item.citationText.visible(!!img && !!textVal && textVal.trim() !== '' && (id !== 'common-bg-image' || currentValues['common-bg-mode'] === 'image'));
             }
             layer.batchDraw();
         }
@@ -597,6 +705,11 @@ export const fontLabels = {
 };
 
 export const tabs = [{
+        id: 'common',
+        label: '공통',
+        heading: '공통'
+    },
+    {
         id: 'left',
         label: '왼쪽 캐릭터',
         heading: '왼쪽'
@@ -618,6 +731,10 @@ export function imageField(side, group) {
     return {
         id,
         ...positions[id],
+        ...(side === 'common' && group === 'bg' ? {
+            visibleWhen: { id: 'common-bg-mode', value: 'image' },
+            placement: 'afterFields'
+        } : {}),
         round: group === 'profile',
         className: group === 'LD' ? 'image-upload-ld' : ''
     };
@@ -641,5 +758,7 @@ export default {
     imageField,
     fontSample,
     initialState,
+    restoreState,
+    migrateState,
     createScene: createPairScene
 };

@@ -17,6 +17,42 @@ export const formOptions = {
     preservePanelPosition: true
 };
 const MAX = 30;
+const COLUMN_OPTIONS = [2, 3, 4, 5];
+const DEFAULT_COLUMNS = 3;
+export function getColumns(state) {
+    return COLUMN_OPTIONS.includes(state.columns) ? state.columns : DEFAULT_COLUMNS;
+}
+// 2～5단 × 1～30명 배치를 한 번만 계산합니다. 카드와 이미지 노드는 그대로 재사용합니다.
+const presetLayouts = new Map(COLUMN_OPTIONS.map(columns => [columns,
+    Array.from({ length: MAX }, (_, offset) => {
+        const count = offset + 1;
+        const rows = Math.ceil(count / columns);
+        const bounds = Object.freeze({
+            width: Math.min(count, columns) * size.width,
+            height: rows * size.height + (rows > 1 ? 2 : 0)
+        });
+        const cells = Array.from({ length: count }, (_, index) => {
+            const row = Math.floor(index / columns);
+            return Object.freeze({ x: index % columns * size.width, y: row * size.height + (row > 0 ? 2 : 0) });
+        });
+        const dividers = [];
+        for (let row = 0; row < rows; row++) {
+            const y = row * size.height + (row > 0 ? 2 : 0);
+            const occupied = Math.min(columns, count - row * columns);
+            for (let col = 1; col < occupied; col++) dividers.push(Object.freeze([col * size.width, y + 41, col * size.width, y + 674]));
+            if (row > 0) dividers.push(Object.freeze([20, y - 3, bounds.width - 20, y - 3]));
+        }
+        return Object.freeze({ bounds, cells: Object.freeze(cells), dividers: Object.freeze(dividers) });
+    })
+]));
+function getLayout(state) {
+    return presetLayouts.get(getColumns(state))[state.members.length - 1];
+}
+export function setColumns(store, columns) {
+    if (!COLUMN_OPTIONS.includes(columns) || columns === getColumns(store.state)) return false;
+    store.change(state => { state.columns = columns; }, 'structure');
+    return true;
+}
 const memberId = n => `member-${n}`;
 const boxes = {
     main: {
@@ -42,13 +78,7 @@ export const positions = Object.fromEntries(Array.from({
         ...box
     }])).flat());
 export function getSize(state) {
-    const count = state.members.length,
-        rows = Math.ceil(count / 3);
-    // 가이드에 명시된 694 / 1390 / 2084px 높이.
-    return {
-        width: Math.min(count, 3) * 615,
-        height: rows * 694 + (rows > 1 ? 2 : 0)
-    };
+    return { ...getLayout(state).bounds };
 }
 export function getPositions(state) {
     return Object.fromEntries(state.members.flatMap(n => ['main', 'sub'].map(key => {
@@ -82,6 +112,7 @@ export function initialState(id = templateId) {
         schemaVersion: 1,
         templateId: id,
         members: [1],
+        columns: DEFAULT_COLUMNS,
         nextNumber: 2,
         values: defaultValues(memberId(1), 1),
         touched: {},
@@ -96,6 +127,9 @@ export function restoreState(raw, next) {
     if (!Number.isSafeInteger(raw.nextNumber) || raw.nextNumber < 2 || raw.nextNumber >= Number.MAX_SAFE_INTEGER)
         throw new Error('캐릭터 번호가 올바르지 않아요.');
     next.members = [...raw.members];
+    if (raw.columns !== undefined && !COLUMN_OPTIONS.includes(raw.columns))
+        throw new Error('단 수는 2～5단 중 하나여야 해요.');
+    next.columns = raw.columns ?? DEFAULT_COLUMNS;
     next.nextNumber = raw.nextNumber;
     next.values = Object.assign({}, ...next.members.map(n => defaultValues(memberId(n), n)));
     return next;
@@ -103,6 +137,8 @@ export function restoreState(raw, next) {
 // 임시 버전의 nextId/큰 ID와 이전 안내문 기본값을 보존 가능한 형태로 이전합니다.
 export function migrateState(source) {
     const raw = structuredClone(source);
+    // 단 수가 없는 기존 파일은 원래 배치인 3단으로 열립니다.
+    if (raw.columns === undefined) raw.columns = DEFAULT_COLUMNS;
     if (raw.nextNumber === undefined && Array.isArray(raw.members)) {
         if (!raw.members.length || raw.members.length > MAX || new Set(raw.members).size !== raw.members.length || raw.members.some(n => !Number.isSafeInteger(n) || n < 1)) throw new Error('캐릭터 목록이 올바르지 않아요.');
         const mapping = new Map(raw.members.map((n, i) => [n, i + 1]));
@@ -537,7 +573,73 @@ export function createScene(stage, openEditor, store) {
     add.innerHTML = '<i class="bi bi-plus" aria-hidden="true"></i>';
     add.setAttribute('aria-label', '캐릭터 추가');
     add.onclick = () => addMember(store);
-    area.append(add);
+    // UI는 Konva 밖에 두어 저장한 PNG에 버튼이 들어가지 않도록 합니다.
+    const layoutActions = document.createElement('div');
+    layoutActions.className = 'member-layout-actions';
+    const columnPicker = document.createElement('div');
+    columnPicker.className = 'member-column-picker';
+    columnPicker.setAttribute('role', 'radiogroup');
+    columnPicker.setAttribute('aria-label', '한 줄에 배치할 캐릭터 수');
+    const columnButtons = COLUMN_OPTIONS.map(columns => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'member-column-button';
+        button.textContent = `${columns}단`;
+        button.dataset.columns = String(columns);
+        button.setAttribute('role', 'radio');
+        button.onclick = () => setColumns(store, columns);
+        columnPicker.append(button);
+        return button;
+    });
+    columnPicker.addEventListener('keydown', event => {
+        const index = columnButtons.indexOf(document.activeElement);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % columnButtons.length;
+        else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index + columnButtons.length - 1) % columnButtons.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = columnButtons.length - 1;
+        else return;
+        event.preventDefault();
+        columnButtons[next].focus();
+        columnButtons[next].click();
+    });
+    layoutActions.append(add, columnPicker);
+    area.append(layoutActions);
+    if (!document.querySelector('[data-member-layout-style]')) {
+        const style = document.createElement('style');
+        style.dataset.memberLayoutStyle = '';
+        style.textContent = `
+            .multi-character-canvas { position: relative; }
+            .member-layout-actions {
+                position: absolute; right: 16px; bottom: 12px;
+                display: flex; align-items: center; gap: 8px; z-index: 30;
+            }
+            .member-layout-actions .canvas-add-member {
+                position: static; inset: auto; transform: none; margin: 0;
+                width: 42px; height: 42px; flex: 0 0 auto;
+            }
+            .member-column-picker {
+                display: flex; align-items: center; gap: 4px;
+                padding: 4px; border: 1px solid #d5d8dc; border-radius: 999px;
+                background: rgba(255,255,255,.96);
+            }
+            .member-column-button {
+                min-width: 44px; height: 36px; padding: 0 10px;
+                border: 0; border-radius: 999px; background: transparent;
+                color: #666; font: inherit; font-size: 14px; cursor: pointer;
+            }
+            .member-column-button[aria-checked="true"] { background: #323232; color: #fff; }
+            .member-column-button:focus-visible { outline: 2px solid #427de2; outline-offset: 2px; }
+            @media (max-width:1024px) {
+                .multi-character-canvas { padding-bottom: 60px; }
+                .member-layout-actions { left: 50%; right: auto; bottom: 8px; transform: translateX(-50%); }
+                .member-layout-actions .canvas-add-member { display: none; }
+                .multi-character-canvas .member-show-all { bottom: 60px; }
+            }
+        `;
+        document.head.append(style);
+    }
     const preview = document.createElement('div');
     preview.className = 'member-preview';
     preview.hidden = true;
@@ -688,7 +790,7 @@ export function createScene(stage, openEditor, store) {
         area.classList.toggle('member-detail-view', visible && compact.matches);
         if (!visible) return;
         const width = compact.matches ? Math.max(1, area.clientWidth - 32) : Math.min(desktopSize.width, innerWidth - 48);
-        const height = compact.matches ? Math.max(1, area.clientHeight - 52) : Math.min(desktopSize.height, innerHeight - 96);
+        const height = compact.matches ? Math.max(1, area.clientHeight - 104) : Math.min(desktopSize.height, innerHeight - 96);
         const scale = Math.min(width / 615, height / 694);
         const output = compact.matches ? {
             width: 615 * scale,
@@ -760,28 +862,25 @@ export function createScene(stage, openEditor, store) {
     return {
         layer,
         updateState(state) {
-            const bounds = getSize(state);
+            const layout = getLayout(state);
+            const bounds = layout.bounds;
             bg.size(bounds);
             add.disabled = state.members.length >= MAX;
+            const columns = getColumns(state);
+            for (const button of columnButtons) {
+                const selected = Number(button.dataset.columns) === columns;
+                button.setAttribute('aria-checked', String(selected));
+                button.tabIndex = selected ? 0 : -1;
+            }
             for (const card of cards) {
                 const index = state.members.indexOf(card.number);
                 card.group.visible(index >= 0);
                 if (index >= 0) {
-                    const row = Math.floor(index / 3);
-                    card.group.position({
-                        x: index % 3 * 615,
-                        y: row * 694 + (row > 0 ? 2 : 0)
-                    });
+                    card.group.position(layout.cells[index]);
                 }
             }
             lines.forEach(line => line.hide());
-            let index = 0;
-            for (let row = 0; row < Math.ceil(state.members.length / 3); row++) {
-                const y = row * 694 + (row > 0 ? 2 : 0),
-                    columns = Math.min(3, state.members.length - row * 3);
-                for (let col = 1; col < columns; col++) lines[index++].points([col * 615, y + 41, col * 615, y + 674]).show();
-                if (row > 0) lines[index++].points([20, y - 3, bounds.width - 20, y - 3]).show();
-            }
+            layout.dividers.forEach((points, index) => lines[index].points(points).show());
         },
         updateValues(values) {
             currentValues = values;
@@ -830,6 +929,8 @@ export default {
     positions,
     getPositions,
     getSize,
+    getColumns,
+    setColumns,
     tabs,
     fields,
     imageField,
